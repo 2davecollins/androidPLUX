@@ -3,15 +3,19 @@ package com.apps.dave.davepluxandroid;
 import android.annotation.TargetApi;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothSocket;
 import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.os.Parcelable;
+import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
@@ -19,14 +23,22 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.RadioButton;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.bitalino.comm.BITalinoDevice;
+import com.bitalino.comm.BITalinoException;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 import info.plux.pluxapi.BTHDeviceScan;
 import info.plux.pluxapi.Communication;
@@ -37,7 +49,12 @@ import info.plux.pluxapi.bitalino.BITalinoDescription;
 import info.plux.pluxapi.bitalino.BITalinoFrame;
 import info.plux.pluxapi.bitalino.BITalinoState;
 
+import static android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED;
 import static com.apps.dave.davepluxandroid.R.layout.activity_main;
+import static info.plux.pluxapi.Constants.ACTION_COMMAND_REPLY;
+import static info.plux.pluxapi.Constants.ACTION_DATA_AVAILABLE;
+import static info.plux.pluxapi.Constants.ACTION_DEVICE_READY;
+import static info.plux.pluxapi.Constants.ACTION_EVENT_AVAILABLE;
 import static info.plux.pluxapi.Constants.EXTRA_COMMAND_REPLY;
 import static info.plux.pluxapi.Constants.EXTRA_DATA;
 import static info.plux.pluxapi.Constants.EXTRA_STATE_CHANGED;
@@ -59,10 +76,13 @@ public class MainActivity extends AppCompatActivity {
     public final static String EXTRA_DEVICE = "info.plux.pluxapi.sampleapp.DeviceActivity.EXTRA_DEVICE";
     public final static String FRAME = "info.plux.pluxapi.sampleapp.DeviceActivity.Frame";
 
+    private boolean bolBroacastRegistred;
+
     ArrayList<BluetoothDevice> bleDevices;
 
     BluetoothAdapter mBluetoothAdapter;
-    BluetoothDevice dev;
+    BluetoothDevice dev = null;
+    BluetoothSocket sock= null;
     IntentFilter filter;
     Handler mHandler;
 
@@ -71,7 +91,15 @@ public class MainActivity extends AppCompatActivity {
     private BTHDeviceScan bthDeviceScan;
     private boolean mScanning;
     private BITalinoCommunication bitalino;
+    private BITalinoCommunication bitalin;
 
+    private BluetoothSocket sock1 = null;
+    private InputStream is = null;
+    private OutputStream os = null;
+    private BITalinoDevice bit;
+
+    private  static final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+    private static final long SCAN_PERIOD = 10000;
 
     TextView action_result;
     TextView action_description;
@@ -79,8 +107,8 @@ public class MainActivity extends AppCompatActivity {
     private RadioButton radioConn;
     private Button next;
 
-
     MyBluetooth myB;
+    boolean isBitalano = false;
 
 
     @Override
@@ -92,7 +120,96 @@ public class MainActivity extends AppCompatActivity {
         setup();
         initView();
         permissionCheck();
+
     }
+    private final BroadcastReceiver pluxReceiver = new BroadcastReceiver() {
+
+        public void onReceive(Context context, Intent intent) {
+
+            String action = intent.getAction();
+            String identifier;
+            Log.d("PluxReceiver  *******>"," action "+action);
+            if (Constants.ACTION_STATE_CHANGED.equals(action)) {
+                identifier = intent.getStringExtra(IDENTIFIER);
+                Constants.States state = Constants.States.getStates(intent.getIntExtra(EXTRA_STATE_CHANGED,0));
+                Log.i(TAG, "Device " + identifier + ": " + state.name());
+                action_result.setText(state.name());
+                if(state.name().equals("DISCONNECTED")){
+                    radioConn.setChecked(false);
+                    Log.d(TAG," disConnected   >>>>>>>>");
+                }else if(state.name().equals("CONNECTED")){
+                    radioConn.setChecked(true);
+                    Log.d(TAG," Connected   >>>>>>>>");
+                }else{
+
+
+                }
+            } else if (Constants.ACTION_MESSAGE_SCAN.equals(action)) {
+                Log.d("PluxReceiver  >>>>", "ACTION_MESSAGE_SCAN" );
+
+            }
+            else if (Constants.ACTION_CONNECTED.equals(action)) {
+                Log.d("PluxReceiver  >>>>", "ACTION_CONNECTED" );
+
+            }
+            else if (Constants.ACTION_DISCONNECTED.equals(action)) {
+                Log.d("PluxReceiver  >>>>", "ACTION_DISCONNECTED" );
+
+            }
+            else if (Constants.ACTION_DATA_AVAILABLE.equals(action)) {
+                Log.d("PluxReceiver  >>>>", "ACTION_DATA_AVAILABLE" );
+
+            }
+            else if (Constants.ACTION_DEVICE_READY.equals(action)) {
+                Log.d("PluxReceiver  >>>>", "ACTION_DEVICE_READY" );
+
+            }
+            else if (Constants.ACTION_EVENT_AVAILABLE.equals(action)) {
+                Log.d("PluxReceiver  >>>>", "ACTION_MESSAGE_SCAN" );
+
+            }
+            else if (Constants.ACTION_COMMAND_REPLY.equals(action)) {
+                Log.d("PluxReceiver  >>>>", "ACTION_COMMAND_REPLY" );
+
+            }
+            else if (Constants.ACTION_LOG_AVAILABLE.equals(action)) {
+                Log.d("PluxReceiver  >>>>", "ACTION_LOG_AVAILABLE" );
+
+            }
+
+            /*
+            Constants
+
+            ACTION_STATE_CHANGED = "info.plux.pluxapi.ACTION_STATE_CHANGED";
+            ACTION_CONNECTED = "info.plux.pluxapi.ACTION_CONNECTED";
+            ACTION_DISCONNECTED = "info.plux.pluxapi.ACTION_DISCONNECTED";
+            ACTION_GATT_SERVICES_DISCOVERED = "info.plux.pluxapi.ACTION_GATT_SERVICES_DISCOVERED";
+            ACTION_DATA_AVAILABLE = "info.plux.pluxapi.ACTION_DATA_AVAILABLE";
+            ACTION_DEVICE_READY = "info.plux.pluxapi.ACTION_DEVICE";
+            ACTION_MESSAGE_SCAN = "info.plux.pluxapi.ACTION_MESSAGE_SCAN";
+            ACTION_EVENT_AVAILABLE = "info.plux.pluxapi.ACTION_EVENT_AVAILABLE";
+            ACTION_COMMAND_REPLY = "info.plux.pluxapi.ACTION_COMMAND_REPLY";
+            ACTION_LOG_AVAILABLE = "info.plux.pluxapi.ACTION_LOG_AVAILABLE";
+            UPDATE_TIME = "info.plux.pluxapi.UPDATE_TIME";
+            EXTRA_STATE_CHANGED = "info.plux.pluxapi.EXTRA_STATE_CHANGED";
+            EXTRA_DEVICE_SCAN = "info.plux.pluxapi.EXTRA_DEVICE_SCAN";
+            EXTRA_DESCRIPTION = "info.plux.pluxapi.EXTRA_DESCRIPTION";
+            EXTRA_DATA = "info.plux.pluxapi.EXTRA_DATA";
+            EXTRA_EVENT = "info.plux.pluxapi.EXTRA_EVENT";
+            EXTRA_COMMAND_REPLY = "info.plux.pluxapi.EXTRA_COMMAND_REPLY";
+            EXTRA_LOG = "info.plux.pluxapi.EXTRA_LOG";
+            EXTRA_TIME = "info.plux.pluxapi.EXTRA_TIME";
+            PLUX_DEVICE = "info.plux.pluxapi.PLUX_DEVICE";
+            BATTERY_EVENT = "info.plux.pluxapi.BATTERY_EVENT";
+            ON_BODY_EVENT = "info.plux.pluxapi.ON_BODY_EVENT";
+            DISCONNECT_EVENT = "info.plux.pluxapi.DISCONNECT_EVENT";
+            IDENTIFIER = "info.plux.pluxapi.IDENTIFIER";
+
+            */
+
+        }
+    };
+
     private final BroadcastReceiver mReceiver = new BroadcastReceiver() {
 
         public void onReceive(Context context, Intent intent) {
@@ -105,19 +222,69 @@ public class MainActivity extends AppCompatActivity {
                 action_result.setText(state.name());
                 if(state.name().equals("DISCONNECTED")){
                     radioConn.setChecked(false);
+                    Log.d(TAG," disConnected   >>>>>>>>");
                     //cleanup();
                     //stopBitalino();
 
                 }else if(state.name().equals("CONNECTED")){
                     radioConn.setChecked(true);
-                    startBitalino();
+                    Log.d(TAG," Connected   >>>>>>>>");
+
+                    try {
+                        sock1 = dev.createRfcommSocketToServiceRecord(MY_UUID);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        Log.d(TAG," IO Exception   >>>>>>>>");
+                    }
+//                    try {
+//                        sock1.connect();
+//                    } catch (IOException e) {
+//                        e.printStackTrace();
+//                        Log.d(TAG," IO Exception   >>>>>>>>");
+//                    }
+
+//                    startBitalino();
+//                    try {
+//                        bit.open(sock1.getInputStream(),sock1.getOutputStream());
+//                    } catch (BITalinoException e) {
+//                        e.printStackTrace();
+//                        Log.d(TAG," BITalinoException exc   >>>>>>>>");
+//                    } catch (IOException e) {
+//                        e.printStackTrace();
+//                        Log.d(TAG," IO Exception   >>>>>>>>");
+//                    }
+
+                    int counter = 0;
+
+//                    while (counter <100){
+//                        final int numSamples = 1000;
+//                        Log.d(TAG, "Reading   :"+counter);
+//
+//                        com.bitalino.comm.BITalinoFrame[] fram = new com.bitalino.comm.BITalinoFrame[0];
+//                        try {
+//                            fram = bit.read(numSamples);
+//                        } catch (BITalinoException e) {
+//                            e.printStackTrace();
+//                            Log.d(TAG,"BIT exp");
+//                        }
+//                        for(com.bitalino.comm.BITalinoFrame frame: fram){
+//
+//                            Log.d(TAG,frame.toString());
+//
+//                        }
+//
+//
+//                        counter ++;
+//
+//                    }
+                    Log.d(TAG, "Reading Finished  :");
 
                 }else{
 
 
                 }
-            } else if (Constants.ACTION_DATA_AVAILABLE.equals(action)) {
-               // BITalinoFrame frames = intent.getParcelableExtra(Constants.EXTRA_DATA);
+            } else if (ACTION_DATA_AVAILABLE.equals(action)) {
+                // BITalinoFrame frames = intent.getParcelableExtra(Constants.EXTRA_DATA);
 
                 Log.d(TAG, "Action Data Available >>>>>>>>>>>  " );
                 if(intent.hasExtra(EXTRA_DATA)){
@@ -128,7 +295,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
 
-            } else if (Constants.ACTION_COMMAND_REPLY.equals(action)) {
+            } else if (ACTION_COMMAND_REPLY.equals(action)) {
 
                 String identifier = intent.getStringExtra(IDENTIFIER);
                 Log.d(TAG,"Action Command Reply >>>>>>>>>>>>>>>>>>  " + identifier);
@@ -146,7 +313,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
 
-            } else if (Constants.ACTION_EVENT_AVAILABLE.equals(action)) {
+            } else if (ACTION_EVENT_AVAILABLE.equals(action)) {
                 Log.d(TAG, "PluxDevice >>>>>>>>>>>>:  ACTION_EVENT_AVAILABLE");
 //                EventData event = intent.getParcelableExtra(Constants.EXTRA_EVENT);
 //                String str = ";
@@ -155,9 +322,9 @@ public class MainActivity extends AppCompatActivity {
 //                } if(event.eventDescription.equals(Constants.BATTERY_EVENT)){
 //                    Log.i(TAG, str + "Battery Level: " + event.batteryLevel);
 //                }
-            } else if (Constants.ACTION_DEVICE_READY.equals(action)) {
+            } else if (ACTION_DEVICE_READY.equals(action)) {
                 String identifier = intent.getStringExtra(IDENTIFIER);
-               // PluxDevice pluxDevice = intent.getParcelableExtra(Constants.PLUX_DEVICE);
+                // PluxDevice pluxDevice = intent.getParcelableExtra(Constants.PLUX_DEVICE);
                 //Log.d(TAG, pluxDevice.toString());
                 Log.d(TAG, ">>>>>>>>>>>>>>>>>>>>  : "+identifier);
                 Toast.makeText(getApplicationContext(), "PluxDevice >>>>>>>>>>>>>" + identifier + ": READY", Toast.LENGTH_LONG).show();
@@ -171,32 +338,116 @@ public class MainActivity extends AppCompatActivity {
                 String deviceHardwareAddress = device.getAddress(); // MAC address
                 Log.d(TAG, "Discovered :"+deviceName+ " : "+deviceHardwareAddress);
                 Toast.makeText(getApplicationContext(), deviceHardwareAddress, Toast.LENGTH_SHORT).show();
+                action_result.setText("Found  :"+deviceHardwareAddress);
             }
             else if(BluetoothAdapter.ACTION_DISCOVERY_STARTED.equals(action)){
                 // run some code
                 Toast.makeText(getApplicationContext(), "Discovery Started", Toast.LENGTH_SHORT).show();
                 Log.d(TAG, "ACTION_DISCOVERY_STARTED: ");
+                action_result.setText("Discovery Started");
             }
             else if(BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)){
                 // run some code
                 Toast.makeText(getApplicationContext(), "Discovery Stop", Toast.LENGTH_SHORT).show();
                 Log.d(TAG, "ACTION_DISCOVERY_FINISHED: ");
+                action_result.setText("Discovery Finished");
             }
-            else if(BluetoothAdapter.ACTION_STATE_CHANGED.equals(action)){
+            else if(ACTION_STATE_CHANGED.equals(action)){
                 if(mBluetoothAdapter.getState() == mBluetoothAdapter.STATE_OFF){
                     Toast.makeText(getApplicationContext(), "Bluetooth off switch on", Toast.LENGTH_SHORT).show();
                     Log.d(TAG, "ACTION_STATE_CHANGED off: ");
+                    action_result.setText("Bluetooth Off");
 
                 }
             }
         }
     };
 
+
+
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         // Inflate the menu; this adds items to the action bar if it is present.
         getMenuInflater().inflate(R.menu.menu_main, menu);
         return true;
+    }
+
+    @Override
+    public boolean onPrepareOptionsMenu(Menu menu) {
+
+        MenuItem action_switch_Bitalano = menu.findItem(R.id.action_switch_Bitalano);
+        MenuItem action_switch_ble = menu.findItem(R.id.action_switch_ble);
+
+
+        MenuItem action_on  = menu.findItem(R.id.action_on );
+        MenuItem action_off = menu.findItem(R.id.action_off);
+        MenuItem action_newpaired = menu.findItem(R.id.action_newpaired);
+        MenuItem action_paired = menu.findItem(R.id.action_paired);
+
+        MenuItem action_unpaired  = menu.findItem(R.id.action_unpaired);
+        MenuItem action_discover = menu.findItem(R.id.action_discover);
+        MenuItem action_connect = menu.findItem(R.id.action_connect);
+        MenuItem action_disconnect = menu.findItem(R.id.action_disconnect);
+
+        MenuItem bit_connect  = menu.findItem(R.id.bit_connect);
+        MenuItem bit_disconnect = menu.findItem(R.id.bit_disconnect);
+        MenuItem bit_start = menu.findItem(R.id.bit_start);
+        MenuItem bit_version  = menu.findItem(R.id.bit_version );
+        MenuItem bit_open  = menu.findItem(R.id.bit_open);
+        MenuItem bit_close = menu.findItem(R.id.bit_close);
+
+
+
+        if(isBitalano)
+        {
+            action_switch_Bitalano.setVisible(false);
+            action_switch_ble.setVisible(true);
+
+            action_on.setVisible(false);
+            action_off.setVisible(false);
+            action_newpaired.setVisible(false);
+            action_unpaired.setVisible(false);
+            action_discover.setVisible(false);
+            action_connect.setVisible(false);
+            action_disconnect.setVisible(false);
+            action_paired.setVisible(false);
+
+
+            bit_connect.setVisible(true);
+            bit_disconnect.setVisible(true);
+            bit_start.setVisible(true);
+            bit_version.setVisible(true);
+            bit_open.setVisible(true);
+            bit_open.setVisible(true);
+            bit_close.setVisible(true);
+        }
+        else
+        {
+            action_switch_Bitalano.setVisible(true);
+            action_switch_ble.setVisible(false);
+
+            action_on.setVisible(true);
+            action_off.setVisible(true);
+            action_newpaired.setVisible(true);
+            action_unpaired.setVisible(true);
+            action_discover.setVisible(true);
+            action_connect.setVisible(true);
+            action_disconnect.setVisible(true);
+            action_paired.setVisible(true);
+
+
+            bit_connect.setVisible(false);
+            bit_disconnect.setVisible(false);
+            bit_start.setVisible(false);
+            bit_version.setVisible(false);
+            bit_open.setVisible(false);
+            bit_open.setVisible(false);
+            bit_close.setVisible(false);
+        }
+        return true;
+
+
+
     }
 
     @Override
@@ -207,26 +458,32 @@ public class MainActivity extends AppCompatActivity {
         int id = item.getItemId();
 
         //noinspection SimplifiableIfStatement
-        if (id == R.id.action_settings) {
-            Toast.makeText(getApplicationContext(), "Start Connevtion :", Toast.LENGTH_SHORT).show();
-            Log.d(TAG, "Start Connection - ");
-            startBitalino();
+        if (id == R.id.action_switch_Bitalano) {
+            Toast.makeText(getApplicationContext(), "Show Bitalano Menu :", Toast.LENGTH_SHORT).show();
+            Log.d(TAG, "Show menu Bitano - ");
+            isBitalano = true;
+
+
+            return true;
+        }
+        if (id == R.id.action_switch_ble) {
+            Toast.makeText(getApplicationContext(), "Show Bluetooth Menu :", Toast.LENGTH_SHORT).show();
+            Log.d(TAG, "Switch Menu - Bluetooth");
+            isBitalano = false;
+
 
             return true;
         }
         if (id == R.id.action_discover) {
             Toast.makeText(getApplicationContext(), "Discover :", Toast.LENGTH_SHORT).show();
             Log.d(TAG, "Discover - ");
-            trigger();
-
+            //TODO Add discovery method
 
             return true;
         }
         if (id == R.id.action_off) {
             Toast.makeText(getApplicationContext(), "BLE Turn OFF :", Toast.LENGTH_SHORT).show();
             Log.d(TAG, "BLE Off - ");
-            stopBitalino();
-            pause(1000);
             turnOffBT();
             return true;
         }
@@ -234,13 +491,13 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(getApplicationContext(), "BLE Turn ON :", Toast.LENGTH_SHORT).show();
             Log.d(TAG, "BLE ON - ");
             turnOnBT();
+
             return true;
         }
         if (id == R.id.action_paired) {
             Toast.makeText(getApplicationContext(), "Paired :", Toast.LENGTH_SHORT).show();
             Log.d(TAG, "Paired - ");
             findPaired();
-            unpairDevice(dev);
 
             return true;
         }
@@ -252,24 +509,90 @@ public class MainActivity extends AppCompatActivity {
             return true;
         }
         if (id == R.id.action_unpaired) {
-            Toast.makeText(getApplicationContext(), "Paired :", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getApplicationContext(), "Unpair :", Toast.LENGTH_SHORT).show();
             Log.d(TAG, "un Pair - ");
             unpairDevice(dev);
 
             return true;
         }
         if (id == R.id.action_disconnect) {
-            Toast.makeText(getApplicationContext(), "Paired :", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getApplicationContext(), "Disconnect :", Toast.LENGTH_SHORT).show();
             Log.d(TAG, "Disconnect- ");
-            stopBitalino();
-            disconnectBitalino();
+            // TODO DISCONNECT TO DEVICE
+
 
             return true;
         }
         if (id == R.id.action_connect) {
             Toast.makeText(getApplicationContext(), "Connect :", Toast.LENGTH_SHORT).show();
             Log.d(TAG, "Connect - ");
-            connectBitalino(remoteMAC);
+            getMenu();
+
+            // TODO CONNECT TO DEVICE
+
+            return true;
+        }
+        if (id == R.id.bit_connect) {
+            Toast.makeText(getApplicationContext(), "Bitalo connect :", Toast.LENGTH_SHORT).show();
+            Log.d(TAG, "Bitalo connect - ");
+            boolean check = radioConn.isChecked();
+            if(!check) {
+                connectBitalino(remoteMAC);
+                Log.d(TAG, "Bitalo not connected - ");
+            }else{
+                Log.d(TAG, "Bitalo is connect - ");
+
+            }
+            return true;
+        }
+        if (id == R.id.bit_disconnect) {
+            Toast.makeText(getApplicationContext(), "Bitalo Disconnect :", Toast.LENGTH_SHORT).show();
+            Log.d(TAG, "Bitalo Disconnect - ");
+            disconnectBitalino();
+
+
+            return true;
+        }
+        if (id == R.id.bit_start) {
+            Toast.makeText(getApplicationContext(), "Bitalo - Start:", Toast.LENGTH_SHORT).show();
+            Log.d(TAG, "Bitalo Start - ");
+            //startBitalino();
+            String fr = getVersionFrame();
+
+            Log.d("Bitalano  >>",fr);
+            startBitalino();
+
+
+
+            return true;
+        }
+        if (id == R.id.bit_open) {
+            Toast.makeText(getApplicationContext(), "Bitalo open - :", Toast.LENGTH_SHORT).show();
+            Log.d(TAG, "Bitalo open - ");
+            new TestAsyncTask(this).execute();
+
+
+            return true;
+        }
+        if (id == R.id.bit_close) {
+            Toast.makeText(getApplicationContext(), "Bitalo close -", Toast.LENGTH_SHORT).show();
+            Log.d(TAG, "Bitalo close  - ");
+            //stopBitalino();
+
+
+
+            return true;
+        }
+        if (id == R.id.bit_version) {
+            Toast.makeText(getApplicationContext(), "Bitalo Version -:", Toast.LENGTH_SHORT).show();
+            Log.d(TAG, "Bitalo Version - ");
+            boolean a = getVersion();
+            if(a) {
+                Log.d("Get Version >>>>>>"," True");
+            }else{
+                Log.d("Get Version >>>>>>"," Flase");
+            }
+
             return true;
         }
 
@@ -279,7 +602,6 @@ public class MainActivity extends AppCompatActivity {
     private void initView(){
         action_result = (TextView) findViewById(R.id.action_result);
         action_description = (TextView) findViewById(R.id.action_description);
-
         radioConn = (RadioButton) findViewById(R.id.radioConn);
         radioConn.setChecked(false);
 
@@ -294,13 +616,32 @@ public class MainActivity extends AppCompatActivity {
         });
 
         //myB = new MyBluetooth(mReceiver,mBluetoothAdapter);
-        dev = mBluetoothAdapter.getRemoteDevice(remoteMAC);
-        Communication communication = Communication.getById(dev.getType());
-        Log.d(TAG, "Communication:" + communication.name());
-
-        bitalino = new BITalinoCommunicationFactory().getCommunication(communication,this);
+//        dev = mBluetoothAdapter.getRemoteDevice(remoteMAC);
+//        Communication communication = Communication.getById(dev.getType());
+//        Log.d(TAG, "Communication:" + communication.name());
+//        bthDeviceScan = new BTHDeviceScan(this);
+//        Log.d(TAG,bthDeviceScan.toString());
+//
+//        bitalino = new BITalinoCommunicationFactory().getCommunication(communication,this);
+//        handler = new Handler(getMainLooper()){
+//            @Override
+//            public void handleMessage(Message msg) {
+//                Bundle bundle = msg.getData();
+//                BITalinoFrame frame = bundle.getParcelable(FRAME);
+//                Log.d(TAG, "Frame msg");
+//
+//                Log.d(TAG, frame.toString());
+//
+//                if(frame != null){ //BITalino
+//                    action_result.setText(frame.toString());
+//                    Log.d("Handler >>>","IIOOOOOIIIIOOOOO");
+//                }
+//            }
+//        };
 
     }
+
+
 
     @Override
     public void onDetachedFromWindow() {
@@ -310,14 +651,70 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        cleanup();
+        //closeBLE();
+
+        //cleanup();
     }
+
     @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        cleanup();
+    protected void onStart() {
+        Log.d("Lifecycle >>>>>>","OnStart");
+        super.onStart();
+
+        //registerReceiver(pluxReceiver, makeUpdatePluxFilter());
+        //setup();
 
     }
+
+
+    @Override
+    protected void onRestart() {
+        Log.d("Lifecycle >>>>>>","OnReStart");
+
+        super.onRestart();
+
+
+
+    }
+
+    @Override
+    protected void onDestroy() {
+        Log.d("Lifecycle >>>>>>","OnDestroy");
+        super.onDestroy();
+        //cleanup();
+        //turnOffBT();
+
+
+    }
+
+    @Override
+    protected void onStop() {
+
+        Log.d("Lifecycle >>>>>>","OnStop");
+        closeBLE();
+        super.onStop();
+
+
+    }
+    public  void closeBLE(){
+        try {
+            unregisterReceiver(pluxReceiver);
+            bolBroacastRegistred = false;
+        }catch(IllegalArgumentException e){
+            e.printStackTrace();
+            Log.d(TAG,"unregister Reciever Error");
+        }
+        try {
+            bitalino.disconnect();
+        } catch (info.plux.pluxapi.bitalino.BITalinoException e) {
+            e.printStackTrace();
+            Log.d(TAG,"bitalino disconnect error");
+        }catch (NullPointerException e){
+            Log.d("Bitano Disconnect","Null Point Exception");
+        }
+
+    }
+
     private void cleanup(){
         try {
             unregisterReceiver(mReceiver);
@@ -327,22 +724,58 @@ public class MainActivity extends AppCompatActivity {
         if(bthDeviceScan != null){
             bthDeviceScan.closeScanReceiver();
         }
-        if(bitalino != null){
-            bitalino.closeReceivers();
-
-            try {
-                bitalino.disconnect();
-            } catch (info.plux.pluxapi.bitalino.BITalinoException e) {
-                e.printStackTrace();
-                Log.d(TAG,"bitalino disconnect error");
-            }
+        try {
+            bitalino.disconnect();
+        } catch (info.plux.pluxapi.bitalino.BITalinoException e) {
+            e.printStackTrace();
+            Log.d(TAG,"bitalino disconnect error");
         }
+
 
 
     }
     private   void setup(){
         //activeChannel = new int[4];
         //activeChannel[0] = 1;
+
+        mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+        if(mBluetoothAdapter == null){
+            Log.d(TAG, "Bluetooth not Supported: ");
+
+        }else{
+            Log.d("setUp >>>>","Register reciever");
+            dev = mBluetoothAdapter.getRemoteDevice(remoteMAC);
+            Communication communication = Communication.getById(dev.getType());
+            bitalino = new BITalinoCommunicationFactory().getCommunication(communication,this);
+            registerReceiver(pluxReceiver, makeUpdatePluxFilter());
+
+            Log.d(TAG, "Communication:" + communication.name());
+//            bthDeviceScan = new BTHDeviceScan(this);
+//            Log.d(TAG,bthDeviceScan.toString());
+
+        }
+
+
+
+        handler = new Handler(getMainLooper()){
+            @Override
+            public void handleMessage(Message msg) {
+                Bundle bundle = msg.getData();
+                BITalinoFrame frame = bundle.getParcelable(FRAME);
+                Log.d(TAG, "Frame msg");
+
+                Log.d(TAG, frame.toString());
+
+                if(frame != null){ //BITalino
+                    action_result.setText(frame.toString());
+                    Log.d("Handler >>>","IIOOOOOIIIIOOOOO");
+                }
+            }
+        };
+
+
+
+
         mHandler= new Handler(){
             @Override
             public void handleMessage(Message msg) {
@@ -366,38 +799,107 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         };
+        ///////////////////////////////
 
-        mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
-        if(mBluetoothAdapter == null){
-            Log.d(TAG, "Bluetooth not Supported: ");
+//
 
-        }else{
+        //////////////////////////////
+
+
+//        Log.d(TAG,  "registering receivers");
+//        filter = new IntentFilter(BluetoothDevice.ACTION_FOUND);
+//        registerReceiver(mReceiver, filter);
+//        filter = new IntentFilter(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
+//        registerReceiver(mReceiver, filter);
+//        filter = new IntentFilter(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
+//        registerReceiver(mReceiver, filter);
+//        filter = new IntentFilter(ACTION_STATE_CHANGED);
+//        registerReceiver(mReceiver, filter);
+//
+//        filter = new IntentFilter(Constants.ACTION_STATE_CHANGED);
+//        registerReceiver(mReceiver, filter);
+//        filter = new IntentFilter(ACTION_DATA_AVAILABLE);
+//        registerReceiver(mReceiver, filter);
+//        filter = new IntentFilter(ACTION_COMMAND_REPLY);
+//        registerReceiver(mReceiver, filter);
+//        filter = new IntentFilter(ACTION_EVENT_AVAILABLE);
+//        registerReceiver(mReceiver, filter);
+//        filter = new IntentFilter(ACTION_DEVICE_READY);
+//        registerReceiver(mReceiver, filter);
+//        filter = new IntentFilter(Constants.ACTION_MESSAGE_SCAN);
+//        registerReceiver(mReceiver, filter);
+
+        //registerReceiver(pluxReceiver, makeUpdatePluxFilter());
+       // registerReceiver(mReceiver, makeUpdateIntentFilter());
+
+
+
+    }
+
+    private IntentFilter makeUpdateIntentFilter() {
+        Log.d(TAG,  "registering receivers bluetooth");
+        final IntentFilter intentFilter = new IntentFilter();
+        intentFilter.addAction(ACTION_STATE_CHANGED);
+        intentFilter.addAction(ACTION_DATA_AVAILABLE);
+        intentFilter.addAction(ACTION_EVENT_AVAILABLE);
+        intentFilter.addAction(ACTION_DEVICE_READY);
+        intentFilter.addAction(ACTION_COMMAND_REPLY);
+        return intentFilter;
+    }
+
+    private IntentFilter makeUpdatePluxFilter(){
+
+        final IntentFilter basicFilter = new IntentFilter();
+        Log.i(TAG,"creating filters bitalano");
+
+        try{
+
+            basicFilter.addAction(Constants.ACTION_STATE_CHANGED);
+            basicFilter.addAction(Constants.ACTION_CONNECTED);
+            basicFilter.addAction(Constants.ACTION_DISCONNECTED);
+            basicFilter.addAction(Constants.ACTION_DATA_AVAILABLE);
+            basicFilter.addAction(Constants.ACTION_MESSAGE_SCAN);
+            basicFilter.addAction(Constants.ACTION_EVENT_AVAILABLE);
+            basicFilter.addAction(Constants.ACTION_COMMAND_REPLY);
+            basicFilter.addAction(Constants.ACTION_LOG_AVAILABLE);
 
 
         }
-        filter = new IntentFilter(BluetoothDevice.ACTION_FOUND);
-        registerReceiver(mReceiver, filter);
-        filter = new IntentFilter(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
-        registerReceiver(mReceiver, filter);
-        filter = new IntentFilter(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
-        registerReceiver(mReceiver, filter);
+        catch (NullPointerException e)
+        {
+            e.getMessage();
+            Log.d("Reciever Broadcast","Null Poin exception");
+        }
 
-        filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
-        registerReceiver(mReceiver, filter);
+//        Log.i(TAG,"creating filters");
+//        bolBroacastRegistred = true;
+//        final IntentFilter basicFilter = new IntentFilter();
+//        basicFilter.addAction(Constants.ACTION_STATE_CHANGED);
+//        basicFilter.addAction(Constants.ACTION_CONNECTED);
+//        basicFilter.addAction(Constants.ACTION_DISCONNECTED);
+//        basicFilter.addAction(Constants.ACTION_DATA_AVAILABLE);
+//        basicFilter.addAction(Constants.ACTION_MESSAGE_SCAN);
+//        basicFilter.addAction(Constants.ACTION_EVENT_AVAILABLE);
+//        basicFilter.addAction(Constants.ACTION_COMMAND_REPLY);
+//        basicFilter.addAction(Constants.ACTION_LOG_AVAILABLE);
 
-        filter = new IntentFilter(Constants.ACTION_STATE_CHANGED);
-        registerReceiver(mReceiver, filter);
-        filter = new IntentFilter(Constants.ACTION_DATA_AVAILABLE);
-        registerReceiver(mReceiver, filter);
-        filter = new IntentFilter(Constants.ACTION_COMMAND_REPLY);
-        registerReceiver(mReceiver, filter);
-        filter = new IntentFilter(Constants.ACTION_EVENT_AVAILABLE);
-        registerReceiver(mReceiver, filter);
-        filter = new IntentFilter(Constants.ACTION_DEVICE_READY);
-        registerReceiver(mReceiver, filter);
-        filter = new IntentFilter(Constants.ACTION_MESSAGE_SCAN);
-        registerReceiver(mReceiver, filter);
 
+        /*
+            ACTION_STATE_CHANGED = "info.plux.pluxapi.ACTION_STATE_CHANGED";
+            ACTION_CONNECTED = "info.plux.pluxapi.ACTION_CONNECTED";
+            ACTION_DISCONNECTED = "info.plux.pluxapi.ACTION_DISCONNECTED";
+            ACTION_GATT_SERVICES_DISCOVERED = "info.plux.pluxapi.ACTION_GATT_SERVICES_DISCOVERED";
+            ACTION_DATA_AVAILABLE = "info.plux.pluxapi.ACTION_DATA_AVAILABLE";
+            ACTION_DEVICE_READY = "info.plux.pluxapi.ACTION_DEVICE";
+            ACTION_MESSAGE_SCAN = "info.plux.pluxapi.ACTION_MESSAGE_SCAN";
+            ACTION_EVENT_AVAILABLE = "info.plux.pluxapi.ACTION_EVENT_AVAILABLE";
+            ACTION_COMMAND_REPLY = "info.plux.pluxapi.ACTION_COMMAND_REPLY";
+            ACTION_LOG_AVAILABLE = "info.plux.pluxapi.ACTION_LOG_AVAILABLE";
+      */
+
+
+
+        return basicFilter;
     }
 
 
@@ -467,11 +969,22 @@ public class MainActivity extends AppCompatActivity {
             Log.d(TAG,a);
             action_description.setText(ans+ " : "+a);
 
-
         }catch (Exception e){
             Log.e(TAG, e.getMessage());
 
         }
+        int secs = 2; // Delay in seconds
+
+        final Handler handler = new Handler();
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                // Do something after 5s = 5000ms
+                Log.d(TAG,"Running code after 5 sec");
+                findPaired();
+            }
+        }, 5000);
+
     }
     //Unpair Device
     public void unpairDevice(BluetoothDevice device) {
@@ -483,9 +996,20 @@ public class MainActivity extends AppCompatActivity {
             Method m = device.getClass()
                     .getMethod("removeBond", (Class[]) null);
             m.invoke(device, (Object[]) null);
+
         } catch (Exception e) {
             Log.e(TAG, e.getMessage());
         }
+        final Handler handler = new Handler();
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                // Do something after 5s = 5000ms
+                Log.d(TAG,"Running code after 5 sec");
+                findPaired();
+            }
+        }, 5000);
+
     }
     //Find Paired Devices
     public void findPaired() {
@@ -528,6 +1052,7 @@ public class MainActivity extends AppCompatActivity {
         return ans;
     }
 
+
     public void startBitalino(){
         int [] a =new int[]{0,1,2,3,4,5};
 
@@ -540,15 +1065,21 @@ public class MainActivity extends AppCompatActivity {
         }
 
     }
-    public  void connectBitalino(String add){
+    public  boolean connectBitalino(String add){
+        boolean b = false;
+
         try {
+
             bitalino.connect(add);
+            b = true;
         } catch (info.plux.pluxapi.bitalino.BITalinoException e) {
             e.printStackTrace();
             Log.d(TAG,"Bitalano connection error ^^^^^^^^^^^^");
         }
+        return b;
     }
     public void disconnectBitalino(){
+
         try {
             bitalino.disconnect();
         } catch (info.plux.pluxapi.bitalino.BITalinoException e) {
@@ -589,6 +1120,31 @@ public class MainActivity extends AppCompatActivity {
         return b;
     }
 
+    public boolean getVersion(){
+        boolean b = false;
+        try{
+            bitalino.getVersion();
+            b = true;
+        } catch (info.plux.pluxapi.bitalino.BITalinoException e) {
+            e.printStackTrace();
+        }
+        return b;
+    }
+    public String getString(){
+        return bitalino.toString();
+
+    }
+    public String getVersionFrame(){
+        //BITalinoFrame(String identifier, int seq, int[] analog, int[] digital)
+        int[] analog = {0,1,2,3};
+        BITalinoFrame frames = new BITalinoFrame(remoteMAC,1,analog,null);
+
+        String ans = frames.toString();
+
+        return ans;
+
+    }
+
     public boolean battery_threshold(int in){
         boolean b = false;
         try {
@@ -609,12 +1165,130 @@ public class MainActivity extends AppCompatActivity {
         }
         return b;
     }
+    private void scanDevice(final boolean enable) {
+        if (enable) {
+            // Stops scanning after a pre-defined scan period.
+            mHandler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    mScanning = false;
+                    bthDeviceScan.stopScan();
+
+                }
+            }, SCAN_PERIOD);
+
+            mScanning = true;
+            bthDeviceScan.doDiscovery();
+        } else {
+            mScanning = false;
+            bthDeviceScan.stopScan();
+        }
+
+    }
+
+//    @Override
+//    public void onBITalinoDataAvailable(BITalinoFrame bitalinoFrame) {
+//        Message message = handler.obtainMessage();
+//        Bundle bundle = new Bundle();
+//        bundle.putParcelable(FRAME, bitalinoFrame);
+//        message.setData(bundle);
+//        handler.sendMessage(message);
+//    }
+
+
     public void pause(int time){
         try {
             Thread.sleep(time);
         } catch (Exception e){
             e.printStackTrace();
             Log.d(TAG,"pause error ...");
+        }
+    }
+
+
+    private class TestAsyncTask extends AsyncTask<Void,String,Void>{
+
+        private BluetoothDevice dev = null;
+        //private BluetoothSocket sock = null;
+        private InputStream is = null;
+        private OutputStream os = null;
+        private BITalinoDevice bit;
+        private Context context;
+
+        public TestAsyncTask(Context c){
+            this.context = c;
+        }
+
+
+        @Override
+        protected Void doInBackground(Void... params) {
+            try{
+                final BluetoothAdapter btA = BluetoothAdapter.getDefaultAdapter();
+                dev = btA.getRemoteDevice(remoteMAC);
+                //dev = btA.getRemoteDevice("test");
+                Log.d(TAG,"Stopping Discovery");
+                btA.cancelDiscovery();
+
+                sock = dev.createRfcommSocketToServiceRecord(MY_UUID);
+                sock.connect();
+
+
+                bit = new BITalinoDevice(1000, new int[]{0,1,2,3,4,});
+                Log.d(TAG,"connecting to :");
+
+                bit.open(sock.getInputStream(),sock.getOutputStream());
+                Log.d(TAG,"Connected  :");
+                //Log.d(TAG, "V :"+bit.version());
+                bit.start();
+
+                int counter = 0;
+
+                while (counter <100){
+                    final int numSamples = 1000;
+                    Log.d(TAG, "Reading   :"+counter);
+
+                    com.bitalino.comm.BITalinoFrame[] fram = bit.read(numSamples);
+                    for(com.bitalino.comm.BITalinoFrame frame: fram){
+
+                        Log.d(TAG,frame.toString());
+
+                    }
+
+
+                    counter ++;
+
+                }
+                Log.d(TAG, "Reading Finished  :");
+
+
+
+
+            } catch (IOException e) {
+                e.printStackTrace();
+                Log.d(TAG,"IO Error "+e);
+            } catch (BITalinoException e) {
+                e.printStackTrace();
+                Log.d(TAG,"IO Error "+e);
+            }
+
+
+            return null;
+        }
+
+        @Override
+        protected void onProgressUpdate(String... values) {
+            super.onProgressUpdate(values);
+        }
+
+        @Override
+        protected void onCancelled() {
+            super.onCancelled();
+            try{
+                bit.stop();
+            } catch (BITalinoException e) {
+                e.printStackTrace();
+                Log.d(TAG,"Stop BIT Error");
+            }
         }
     }
 
@@ -698,6 +1372,37 @@ public class MainActivity extends AppCompatActivity {
                 break;
 
         }
+    }
+
+    public void getMenu(){
+
+        AlertDialog.Builder popDialog = new AlertDialog.Builder(MainActivity.this);
+        View editText = new EditText(MainActivity.this);
+        int width = 150;
+        int height = -1;
+        float gravity = 1.0f;
+        editText.setLayoutParams(new Toolbar.LayoutParams(width,height,(int) gravity));
+        popDialog.setTitle("The Title");
+        popDialog.setMessage((CharSequence) "Click Yes To Exit app");
+        popDialog.setView(editText);
+        popDialog.setPositiveButton("Yes",new DialogInterface.OnClickListener() {
+            public void onClick(DialogInterface dialog,int id) {
+
+                MainActivity.this.finish();
+            }
+        });
+        popDialog.setNegativeButton("No",new DialogInterface.OnClickListener() {
+            public void onClick(DialogInterface dialog,int id) {
+
+                dialog.cancel();
+            }
+        });
+
+        popDialog.setCancelable(true);
+        popDialog.create();
+        popDialog.show();
+
+
     }
 
 
