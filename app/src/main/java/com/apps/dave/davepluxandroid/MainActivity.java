@@ -91,6 +91,8 @@ public class MainActivity extends AppCompatActivity {
     IntentFilter filter;
     //Handler mHandler;
 
+    BluetoothDevice device;
+
 
 //    DeviceTest myd = null;
 //    DeviceBluetooth myDevice = null;
@@ -105,7 +107,7 @@ public class MainActivity extends AppCompatActivity {
 
     TextView action_result;
     TextView action_description;
-    TextView actuin_error;
+    TextView action_error;
 
     private GraphView g1;
 
@@ -134,7 +136,6 @@ public class MainActivity extends AppCompatActivity {
         setSupportActionBar(toolbar);
 
         initView();
-        setTestMode(false);
         permissionCheck();
     }
 
@@ -143,7 +144,7 @@ public class MainActivity extends AppCompatActivity {
     private void initView(){
         action_result = (TextView) findViewById(R.id.action_result);
         action_description = (TextView) findViewById(R.id.action_description);
-        actuin_error = (TextView) findViewById(R.id.action_error);
+        action_error = (TextView) findViewById(R.id.action_error);
         radioConn = (RadioButton) findViewById(R.id.radioBluetooth);
         radioConn.setChecked(false);
         radioPlux = (RadioButton) findViewById(R.id.pluxConnect);
@@ -154,9 +155,12 @@ public class MainActivity extends AppCompatActivity {
         radioTest = (RadioButton) findViewById(R.id.test_mode);
         radioTest.setChecked(true);
         g1 =(GraphView) findViewById(R.id.g1);
+        initDevice("test");
+        isInTestMode = true;
+
 
         next = (Button) findViewById(R.id.action_next);
-        initDevice(remoteMAC);
+
         next.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -196,11 +200,13 @@ public class MainActivity extends AppCompatActivity {
 
         IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_FOUND);
         registerReceiver(mReceiver, filter);
-
+        filter = new IntentFilter(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
+        registerReceiver(mReceiver, filter);
         filter = new IntentFilter(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
         registerReceiver(mReceiver, filter);
-
         filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
+        registerReceiver(mReceiver,filter);
+        filter = new IntentFilter(BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED);
         registerReceiver(mReceiver,filter);
 
         //connectDevice();
@@ -227,24 +233,129 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     private void connectDevice() {
+        Log.d(TAG,"Connect to device chat");
 
-        BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(remoteMAC);
+        device = mBluetoothAdapter.getRemoteDevice(remoteMAC);
         // Attempt to connect to the device
-        boolean secure = true;
+        boolean secure = false;
         mChatService.connect(device, secure);
+    }
+
+    private void disConnectDevice() {
+        Log.d(TAG,"Dis-Connect to device chat");
+        radioPlux.setChecked(false);
+        mChatService.stop();
+
+    }
+    private void getDeviceName(){
+        action_result.setText("Message\n");
+        Log.d(TAG,"get device name");
+        byte[] data;
+        mChatService.write("V".getBytes());
+
+    }
+
+    private void beginBAcq(){
+        int frequency =1000;
+        int channelMask = 255;
+        int numberBits = 12;
+        int channelNumber = 0;
+
+        StringBuilder sb = new StringBuilder();
+        StringBuilder sb2 = new StringBuilder();
+
+        String frequencyString = "0000" + frequency;
+        String channelString = "00" + Integer.toHexString(channelMask).toUpperCase();
+        String numberBitsString = "00" + numberBits;
+
+        for (int i = 0; i < 8; i++)
+        {
+            if ((channelMask & 0x1) == 1)
+            {
+                sb2.append(i + 1);
+                sb2.append(" ");
+                channelNumber = ((byte)(channelNumber + 1));
+            }
+            channelMask >>= 1;
+        }
+        sb.append("@START,");
+        sb.append(frequencyString.substring(frequencyString.length() - 4, frequencyString.length()));
+        sb.append(",");
+        sb.append(channelString.substring(channelString.length() - 2, channelString.length()));
+        sb.append(",");
+        sb.append(numberBitsString.substring(numberBitsString.length() - 2, numberBitsString.length()));
+        sb.append(";");
+
+
+        mChatService.write(sb.toString().getBytes());
+
+
+        //setNumberOfChannels(sour);
+
+       //command = ((CommandProperties)a.a.getCommand(commandArguments)).command;
+
+
+
+
+
+
+
+
+    }
+    private void endBAcq (){
+
+//        List<Source> sour = new ArrayList<>();
+//        Source emgSource = new Source(1,16,(byte)0x01,100);
+//        Source inertial = new Source(2,16,(byte)0xeF,100);
+//
+//        sour.add(emgSource);
+//        sour.add(inertial);
+//        CommandArguments commandArguments;
+//        (commandArguments = new CommandArguments()).setBaseFreq(1000);
+//        commandArguments.setSources(sour);
+//
+//        Log.d(TAG,"Port "+String.valueOf(emgSource.getPort()));
+//        Log.d(TAG,"Channel Mask "+String.valueOf(emgSource.getChannelMask()));
+//        Log.d(TAG,"nBits "+String.valueOf(emgSource.getnBits()));
+
+
+//        (commandArguments = new CommandArguments()).setBaseFreq(1000);
+//        commandArguments.setSources(sour);
+
+        try {
+//            CommandArguments command = new CommandArguments();
+//            commandArguments.setBatteryThreshold(value);
+
+            // byte[] comm = ((CommandProperties)BITalino.BATTERY.getCommand(commandArguments)).command;
+
+            byte[] comm = BITalino.STOP.toString().getBytes();
+            Log.d(TAG,"Command get State"+String.valueOf(comm));
+            //comm = "V".getBytes();
+            mChatService.write(comm);
+        }catch (NullPointerException e){
+            Log.d(TAG,"Null point Exception");
+        }
+        //mChatService.write("R".getBytes());
+
     }
 
 
     private final Handler mHandler = new Handler() {
         @Override
         public void handleMessage(Message msg) {
-            //FragmentActivity activity = getActivity();
+
+
+
             switch (msg.what) {
+
                 case Constants.MESSAGE_STATE_CHANGE:
                     switch (msg.arg1) {
                         case BluetoothChatService.STATE_CONNECTED:
                             Log.d(TAG,"state connected");
+                            radioPlux.setChecked(true);
+                            getDeviceName();
                             break;
+
                         case BluetoothChatService.STATE_CONNECTING:
                             Log.d(TAG,"state Connecting ....");
                             break;
@@ -257,26 +368,33 @@ public class MainActivity extends AppCompatActivity {
                     }
                     break;
                 case Constants.MESSAGE_WRITE:
+                    Log.d(TAG,"MESSAGE_WRITE");
                     byte[] writeBuf = (byte[]) msg.obj;
                     // construct a string from the buffer
                     String writeMessage = new String(writeBuf);
+                    Log.d(TAG,"WM  >"+writeMessage);
                    // mConversationArrayAdapter.add("Me:  " + writeMessage);
                     break;
                 case Constants.MESSAGE_READ:
                     byte[] readBuf = (byte[]) msg.obj;
                     // construct a string from the valid bytes in the buffer
                     String readMessage = new String(readBuf, 0, msg.arg1);
-                    Log.d(TAG,readMessage);
+                    Log.d(TAG,"RM >>>>"+readMessage);
+                    action_result.append(readMessage);
                    // mConversationArrayAdapter.add(mConnectedDeviceName + ":  " + readMessage);
                     break;
                 case Constants.MESSAGE_DEVICE_NAME:
                     // save the connected device's name
+                    Log.d(TAG,"MESSAGE_DEVICE_NAME");
                     mConnectedDeviceName = msg.getData().getString(Constants.DEVICE_NAME);
+                    action_description.setText("");
                     action_description.setText(mConnectedDeviceName);
 
                     break;
                 case Constants.MESSAGE_TOAST:
-                    Log.d(TAG, msg.getData().getString(Constants.TOAST));
+                    String efromchat = msg.getData().getString(Constants.TOAST);
+                    Log.d(TAG, "Message Toast >>"+efromchat);
+                    action_error.setText(efromchat);
 
                     break;
             }
@@ -290,18 +408,27 @@ public class MainActivity extends AppCompatActivity {
             if (BluetoothDevice.ACTION_FOUND.equals(action)) {
                 // Discovery has found a device. Get the BluetoothDevice
                 // object and its info from the Intent.
+                Log.d(TAG,"Action_Found");
 
                 BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
                 String deviceName = device.getName();
                 String deviceHardwareAddress = device.getAddress(); // MAC address
                 Log.d(TAG,deviceName+" : "+deviceHardwareAddress);
+                action_result.append(deviceName+"\n");
+            }
+            if(BluetoothAdapter.ACTION_DISCOVERY_STARTED.equals(action)){
+                Log.d(TAG,"Discovery Started");
+                radioAcq.setChecked(true);
             }
             if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
                 // Discovery has found a device. Get the BluetoothDevice
                 // object and its info from the Intent.
                 radioAcq.setChecked(false);
-
                 Log.d(TAG,"Discovery Finished");
+            }
+            if(BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED.equals(action)){
+                Log.d(TAG,"ACTION_CONNECTION_STATE_CHANGED");
+
             }
             if(BluetoothAdapter.ACTION_STATE_CHANGED.equals(action)){
                 Log.d(TAG,"Bluetooth state Changed");
@@ -310,9 +437,7 @@ public class MainActivity extends AppCompatActivity {
     }
     };
 
-    private void setTestMode(boolean testMode) {
 
-    }
     private   void setup(){
 //        mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
 //        if(mBluetoothAdapter == null){
@@ -370,7 +495,8 @@ public class MainActivity extends AppCompatActivity {
         MenuItem inTestMode = menu.findItem(R.id.test_mode);
         MenuItem inRealMode = menu.findItem(R.id.real_mode);
 
-
+        //reset errors on new menu choice
+        action_error.setText("");
 
         if(isOn){
             action_on.setVisible(false);
@@ -421,8 +547,6 @@ public class MainActivity extends AppCompatActivity {
             Log.d(TAG, "BLE Off - ");
             turnOffBT();
             isOn = false;
-
-
             return true;
         }
         if (id == action_on) {
@@ -430,7 +554,6 @@ public class MainActivity extends AppCompatActivity {
             Log.d(TAG, "BLE ON - ");
             turnOnBT();
             isOn = true;
-
             return true;
         }
 
@@ -438,15 +561,15 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(getApplicationContext(), "Discover :", Toast.LENGTH_SHORT).show();
             Log.d(TAG, "Discover - ");
             //TODO Add discovery method
+            action_result.setText("Discovered\n");
             //connectDevice();
+            if(mBluetoothAdapter == null){
+                return true;
+            }
             if (mBluetoothAdapter.isDiscovering()) {
                 mBluetoothAdapter.cancelDiscovery();
             }
-
-            // Request discover from BluetoothAdapter
             mBluetoothAdapter.startDiscovery();
-            radioAcq.setChecked(true);
-
 
             return true;
         }
@@ -462,7 +585,6 @@ public class MainActivity extends AppCompatActivity {
             Log.d(TAG, "Pair again - ");
             pairDevice(dev);
             isPaired = true;
-
 
             return true;
         }
@@ -480,17 +602,19 @@ public class MainActivity extends AppCompatActivity {
             isAquiring = true;
 
             // TODO CONNECT TO DEVICE
-            try {
-                myDevice.BeginAcq();
-                radioAcq.setChecked(true);
 
-            } catch (BPException e) {
-                e.printStackTrace();
-                radioAcq.setChecked(false);
-            }catch(NullPointerException e){
-                e.printStackTrace();
-                radioAcq.setChecked(false);
-            }
+            beginBAcq();
+//            try {
+//                myDevice.BeginAcq();
+//                radioAcq.setChecked(true);
+//
+//            } catch (BPException e) {
+//                e.printStackTrace();
+//                radioAcq.setChecked(false);
+//            }catch(NullPointerException e){
+//                e.printStackTrace();
+//                radioAcq.setChecked(false);
+//            }
 
             //new NewAsyncTask ().execute();
 
@@ -501,15 +625,20 @@ public class MainActivity extends AppCompatActivity {
             Log.d(TAG, "End Aqu- ");
             isAquiring = false;
             // TODO DISCONNECT TO DEVICE
+            endBAcq ();
+           // pause(500);
 
-            try {
-                myDevice.EndAcq();
-                radioAcq.setChecked(false);
-            } catch (BPException e) {
-                e.printStackTrace();
-                Log.d(TAG,"End Acqerror");
-                action_description.setText(e.toString());
-            }
+
+
+//            try {
+//                myDevice.EndAcq();
+//                radioAcq.setChecked(false);
+//            } catch (BPException e) {
+//                e.printStackTrace();
+//                Log.d(TAG,"End Acqerror");
+//                action_description.setText("");
+//                action_description.setText(e.toString());
+//            }
 
 
             return true;
@@ -529,12 +658,15 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(getApplicationContext(), "Close -", Toast.LENGTH_SHORT).show();
             Log.d(TAG, "Close   - ");
             action_description.setText("");
+            disConnectDevice();
             try {
                 myDevice.Close();
             } catch (BPException e) {
                 e.printStackTrace();
+                Log.d(TAG, "Close  error BPException - ");
             }catch(NullPointerException e){
                 e.printStackTrace();
+                Log.d(TAG, "Close  error NullPointException - ");
             }
             return true;
         }
@@ -564,15 +696,76 @@ public class MainActivity extends AppCompatActivity {
         if (id == R.id.test_mode) {
             Toast.makeText(getApplicationContext(), "Test Mode :", Toast.LENGTH_SHORT).show();
             Log.d(TAG, "Test Mode ON - ");
-            setTestMode(true);
             isInTestMode = true;
+            radioTest.setChecked(true);
+            g1.removeAllSeries();
+            try {
+                myDevice.Close();
+            } catch (BPException e) {
+                e.printStackTrace();
+            }catch(NullPointerException e){
+                e.printStackTrace();
+                action_error.setText(e.getMessage());
+            }
+            try {
+                myDevice = Device.Create("test");
+            } catch (BPException e) {
+                e.printStackTrace();
+                action_error.setText(e.getMessage());
+            }
+            try {
+                String ans = myDevice.GetDescription();
+                Log.d(TAG,"Device  :"+ans);
+                action_description.setText("");
+                action_description.setText(ans);
+            } catch (BPException e) {
+                e.printStackTrace();
+                Log.d(TAG,"get description error");
+                action_error.setText(e.toString());
+            } catch (NullPointerException e){
+                e.printStackTrace();
+                Log.d(TAG,"get description error");
+               action_error.setText(e.toString());
+            }
+
             return true;
         }
         if (id == R.id.real_mode) {
             Toast.makeText(getApplicationContext(), "Real Time Mode:", Toast.LENGTH_SHORT).show();
             Log.d(TAG, "Real Time Mode - ");
             isInTestMode = false;
-            setTestMode(false);
+
+            g1.removeAllSeries();
+            radioTest.setChecked(false);
+            try {
+                myDevice.Close();
+            } catch (BPException e) {
+                e.printStackTrace();
+            }catch(NullPointerException e){
+                e.printStackTrace();
+                action_error.setText(e.getMessage());
+            }
+            try {
+                myDevice = Device.Create(remoteMAC);
+            } catch (BPException e) {
+                e.printStackTrace();
+                action_error.setText(e.getMessage());
+            }
+
+            try {
+                String ans = myDevice.GetDescription();
+                Log.d(TAG,"Device  :"+ans);
+                action_description.setText("");
+                action_description.setText(ans);
+            } catch (BPException e) {
+                e.printStackTrace();
+                Log.d(TAG,"get description error");
+                action_error.setText(e.toString());
+            } catch (NullPointerException e){
+                e.printStackTrace();
+                Log.d(TAG,"get description error");
+                action_error.setText(e.toString());
+            }
             return true;
         }
         return super.onOptionsItemSelected(item);
@@ -775,7 +968,7 @@ public class MainActivity extends AppCompatActivity {
             Log.d(TAG, "Bluetooth Not Enabled...");
             return;
         }
-        action_result.setText("");
+        action_result.setText("Paired\n");
         Set<BluetoothDevice> pairedDevices = mBluetoothAdapter.getBondedDevices();
         if (pairedDevices.size() > 0) {
             // There are paired devices. Get the name and address of each paired device.
@@ -810,13 +1003,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void initDevice(String mac){
-        actuin_error.setText("");
+        action_error.setText("");
         try {
             myDevice = Device.Create(mac);
         } catch (BPException e) {
             e.printStackTrace();
             Log.d(TAG,"Create error "+e.getMessage());
-            actuin_error.setText(e.getMessage());
+            action_error.setText(e.getMessage());
         }catch(NullPointerException e){
             Log.d(TAG,"Null Point Exception");
         }
@@ -827,7 +1020,7 @@ public class MainActivity extends AppCompatActivity {
         } catch (BPException e) {
             e.printStackTrace();
             Log.d(TAG,"Get Description error "+e.getMessage());
-            actuin_error.setText(e.getMessage());
+            action_error.setText(e.getMessage());
         }catch(NullPointerException e){
             Log.d(TAG,"Null Point Exception");
 
@@ -851,7 +1044,7 @@ public class MainActivity extends AppCompatActivity {
         } catch (BPException e) {
             e.printStackTrace();
             Log.d(TAG,"Begin Aqu error ");
-            actuin_error.setText(e.getMessage());
+            action_error.setText(e.getMessage());
         }
 
         Device.Frame[] frames = new Device.Frame[nFrames];
@@ -865,7 +1058,7 @@ public class MainActivity extends AppCompatActivity {
         } catch (BPException e) {
             e.printStackTrace();
             Log.d(TAG,"Get Frames error ");
-            actuin_error.setText(e.getMessage());
+            action_error.setText(e.getMessage());
         }
 
         try {
@@ -873,7 +1066,7 @@ public class MainActivity extends AppCompatActivity {
         } catch (BPException e) {
             e.printStackTrace();
             Log.d(TAG,"End Aqu error ");
-            actuin_error.setText(e.getMessage());
+            action_error.setText(e.getMessage());
         }
 
         String result;
